@@ -49,6 +49,9 @@ void ftt_reader (string filename, pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, 
 					nose_tip.z = z;	
 				}
 				counter = counter + 1;
+				if (counter >= 60) {
+					break;
+				}
 			}
 		}
 		myfile.close();
@@ -92,14 +95,12 @@ int main(int argc, char** argv) {
 	pcl::io::loadOBJFile (filename_2, *cloud_2_0);
 	ftt_reader(filename_1_sp, cloud_1_sp, nose_tip_1);
 	ftt_reader(filename_2_sp, cloud_2_sp, nose_tip_2);
-	cout << nose_tip_1 << endl;
 	
 	croppc(cloud_1_0, nose_tip_1, cloud_1);
 	croppc(cloud_2_0, nose_tip_2, cloud_2);
 
 	// visualize them
-	pcl::visualization::PCLVisualizer viewer;
-	viewer.setBackgroundColor(1, 1, 1);
+
 	for (int i=0; i<cloud_1->size(); i++) {
 		cloud_1->points[i].r = 255;
 		cloud_1->points[i].g = 0;
@@ -111,134 +112,90 @@ int main(int argc, char** argv) {
 		cloud_2->points[i].b = 0;
 	}
 	for (int i=0; i<cloud_1_sp->size(); i++) {
-		cloud_1_sp->points[i].r = 0;
+		cloud_1_sp->points[i].r = 255;
 		cloud_1_sp->points[i].g = 0;
-		cloud_1_sp->points[i].b = 255;
+		cloud_1_sp->points[i].b = 0;
 	}
 	for (int i=0; i<cloud_2_sp->size(); i++) {
 		cloud_2_sp->points[i].r = 0;
 		cloud_2_sp->points[i].g = 0;
 		cloud_2_sp->points[i].b = 255;
 	}
+
+	// transform clouds so that nose tip is at 0.
+	Eigen::Matrix4f transform_1 = Eigen::Matrix4f::Identity();
+	transform_1(0,3) = -nose_tip_1.x;
+	transform_1(1,3) = -nose_tip_1.y;
+	transform_1(2,3) = -nose_tip_1.z;
+	pcl::transformPointCloud(*cloud_1, *cloud_1, transform_1);
+	pcl::transformPointCloud(*cloud_1_sp, *cloud_1_sp, transform_1);
+
+	Eigen::Matrix4f transform_2 = Eigen::Matrix4f::Identity();
+	transform_2(0,3) = -nose_tip_2.x;
+	transform_2(1,3) = -nose_tip_2.y;
+	transform_2(2,3) = -nose_tip_2.z;
+	pcl::transformPointCloud(*cloud_2, *cloud_2, transform_2);
+	pcl::transformPointCloud(*cloud_2_sp, *cloud_2_sp, transform_2);
+
+	// align them using SVD
+	pcl::registration::TransformationEstimationSVD<pcl::PointXYZRGB,pcl::PointXYZRGB> TESVD;
+	pcl::registration::TransformationEstimationSVD<pcl::PointXYZRGB,pcl::PointXYZRGB>::Matrix4 transformation;
+	TESVD.estimateRigidTransformation (*cloud_2_sp,*cloud_1_sp,transformation);
+	transformation(0,3) = 0;
+	transformation(1,3) = 0;
+	transformation(2,3) = 0;
+
+	pcl::transformPointCloud (*cloud_2, *cloud_2, transformation);
+	pcl::transformPointCloud (*cloud_2_sp, *cloud_2_sp, transformation);
+
+	// visualize the result
+	// pcl::visualization::PCLVisualizer viewer;
+	// viewer.setBackgroundColor(1, 1, 1);
 	// while (!viewer.wasStopped ()){
 	// 	viewer.removeAllPointClouds();
-	// 	pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb(cloud_1);
-	// 	viewer.addPointCloud<pcl::PointXYZRGB>(cloud_1, rgb, "pc");
 
-	// 	pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb1(cloud_1_sp);
-	// 	viewer.addPointCloud<pcl::PointXYZRGB>(cloud_1_sp, rgb1, "target");
+	// 	pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb(cloud_1_sp);
+	// 	viewer.addPointCloud<pcl::PointXYZRGB>(cloud_1_sp, rgb, "pc");
+	// 	viewer.setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 3, "pc");
+
+	// 	pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb1(cloud_2_sp);
+	// 	viewer.addPointCloud<pcl::PointXYZRGB>(cloud_2_sp, rgb1, "target");
 	// 	viewer.setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 3, "target");
 	// 	viewer.spinOnce(30);
-	// }
-
-	// transform cloud_2 so that nose tips match
-	Eigen::Matrix4f transform_1 = Eigen::Matrix4f::Identity();
-	transform_1(0,3) = nose_tip_1.x - nose_tip_2.x;
-	transform_1(1,3) = nose_tip_1.y - nose_tip_2.y;
-	transform_1(2,3) = nose_tip_1.z - nose_tip_2.z;
-	pcl::transformPointCloud(*cloud_2, *cloud_2_tr, transform_1);
-
-	// align them using icp
-	pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
-	icp.setInputSource(cloud_1);
-	icp.setInputTarget(cloud_2_tr);
-	icp.setMaxCorrespondenceDistance (50);
-	pcl::PointCloud<pcl::PointXYZRGB>::Ptr Final (new pcl::PointCloud<pcl::PointXYZRGB>);
-	icp.align(*Final);				
-	std::cout << "has converged:" << icp.hasConverged() << " score: " <<
-	icp.getFitnessScore() << std::endl;
-	std::cout << icp.getFinalTransformation() << std::endl;
-	// visualize the result
-	pcl::visualization::PCLVisualizer viewer1;
-	viewer1.setBackgroundColor(1, 1, 1);
-	// viewer1.addCoordinateSystem (50.0);
-	// while (!viewer1.wasStopped ()){
-	// 	viewer1.removeAllPointClouds();
-	// 	pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb(cloud_2_tr);
-	// 	viewer1.addPointCloud<pcl::PointXYZRGB>(cloud_2_tr, rgb, "pc");
-
-	// 	pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb1(cloud_1);
-	// 	viewer1.addPointCloud<pcl::PointXYZRGB>(cloud_1, rgb1, "target");
-	// 	viewer1.spinOnce(30);
-
-	// 	// pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb1(cloud_2_sp);
-	// 	// viewer1.addPointCloud<pcl::PointXYZRGB>(cloud_2_sp, rgb1, "target");
-	// 	// viewer1.setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 3, "target");
-	// 	// viewer1.spinOnce(30);
 	// }
 
 	// kdtrees
 	pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree;
 	kdtree.setInputCloud (cloud_1);
-	
-	for (int i=0; i<cloud_2_tr->size(); i++) {
+	double weight = 0;
+	for (int i=0; i<cloud_2->size(); i++) {
 		int K=1;
 		std::vector<int> pointIdxNKNSearch(K);
 		std::vector<float> pointNKNSquaredDistance(K);
-		if ( kdtree.nearestKSearch (cloud_2_tr->points[i], K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0 ) {
-			//DIST(cloud_2_tr->points[i].x,cloud_2_tr->points[i].y,cloud_2_tr->points[i].z,cloud_1->points[pointIdxNKNSearch[0]].x,cloud_1->points[pointIdxNKNSearch[0]].y,cloud_1->points[pointIdxNKNSearch[0]].z);
+		if ( kdtree.nearestKSearch (cloud_2->points[i], K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0 ) {
 			int color = pointNKNSquaredDistance[0] * 255 / 20;
+			weight = weight + pointNKNSquaredDistance[0]/double(cloud_2->size());
 			if (color >255)
 				color = 255;
-			// cout << color << endl;
-			cloud_2_tr->points[i].r = color;
-			cloud_2_tr->points[i].g = 0;
-			cloud_2_tr->points[i].b = 0;
+			cloud_2->points[i].r = color;
+			cloud_2->points[i].g = 0;
+			cloud_2->points[i].b = 0;
 		}
 	}
-	float angularResolution = (float) (  0.1f * (M_PI/180.0f));  //   1.0 degree in radians
-	float maxAngleWidth     = (float) (180.0f * (M_PI/180.0f));  // 180.0 degree in radians
-	float maxAngleHeight    = (float) (180.0f * (M_PI/180.0f));  // 180.0 degree in radians
 
-	Eigen::Affine3f sensorPose = (Eigen::Affine3f)Eigen::Translation3f(0.0f, 0.0f, -100.0f);
-	sensorPose(1,1) = -sensorPose(1,1);
-	pcl::RangeImage::CoordinateFrame coordinate_frame = pcl::RangeImage::CAMERA_FRAME;
-	float noiseLevel = 0.00;
-	float minRange = 0.0f;
-	int borderSize = 1;
-	boost::shared_ptr<pcl::RangeImage> range_image_ptr(new pcl::RangeImage);
-	pcl::RangeImage& rangeImage = *range_image_ptr;
-	rangeImage.createFromPointCloud(*cloud_2_tr, angularResolution, maxAngleWidth, maxAngleHeight,
-	                              sensorPose, coordinate_frame, noiseLevel, minRange, borderSize);
+	cout << "Weight = " << weight << endl;
+	
 
-	cout << rangeImage << "\n";
-
-	// pcl::visualization::PCLVisualizer viewer2;
-	// viewer2.setBackgroundColor (1, 1, 1);
-	// pcl::visualization::PointCloudColorHandlerCustom<pcl::PointWithRange> range_image_color_handler (range_image_ptr, 0,0,0);
-	// viewer2.addPointCloud (range_image_ptr, range_image_color_handler, "range image");
-	// viewer2.setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "range image");
-	// viewer2.initCameraParameters ();
-	// setViewerPose(viewer2, rangeImage.getTransformationToWorldSystem ());
-	// pcl::visualization::RangeImageVisualizer range_image_widget ("range image");
-	// range_image_widget.showRangeImage (rangeImage);
-
-	// while (!viewer2.wasStopped ()) {
-	// 	// range_image_widget.spinOnce ();
-	// 	// viewer.spinOnce ();
- //  //   	pcl_sleep (0.01);
-
- //    	viewer2.removeAllPointClouds();
-	// 	pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb(cloud_2_tr);
-	// 	viewer2.addPointCloud<pcl::PointXYZRGB>(cloud_2_tr, rgb, "pc");
-	// 	viewer2.spinOnce(30);
+	// pcl::visualization::PCLVisualizer viewer1;
+	// viewer1.setBackgroundColor(1, 1, 1);
+	// viewer1.addCoordinateSystem (50.0);
+	// while (!viewer1.wasStopped ()){
+	// 	viewer1.removeAllPointClouds();
+	// 	pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb(cloud_2);
+	// 	viewer1.addPointCloud<pcl::PointXYZRGB>(cloud_2, rgb, "pc");
+	// 	viewer1.setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "pc");
+	// 	viewer1.spinOnce(30);
 	// }
-
-	while (!viewer1.wasStopped ()){
-		viewer1.removeAllPointClouds();
-		pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb(cloud_2_tr);
-		viewer1.addPointCloud<pcl::PointXYZRGB>(cloud_2_tr, rgb, "pc");
-		viewer1.setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "pc");
-
-		// pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb1(cloud_1);
-		// viewer1.addPointCloud<pcl::PointXYZRGB>(cloud_1, rgb1, "target");
-		viewer1.spinOnce(30);
-
-		// pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb1(cloud_2_sp);
-		// viewer1.addPointCloud<pcl::PointXYZRGB>(cloud_2_sp, rgb1, "target");
-		// viewer1.setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 3, "target");
-		// viewer1.spinOnce(30);
-	}
 
 	return 0;
 }
